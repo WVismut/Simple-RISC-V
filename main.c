@@ -143,7 +143,8 @@ int main(int argc, char **argv) {
 
     hart_state_t main_hart;
     main_hart.pc = 0;
-    main_hart.x[0] = 0;
+    main_hart.x[0];
+    memset(main_hart.x, 0, sizeof main_hart.x);
 
     r_instruction_t r_instr;
     i_instruction_t i_instr;
@@ -181,10 +182,11 @@ int main(int argc, char **argv) {
 
                         switch (i_instr.funct3 & 0b111) {
                             case 0b000: // addi
-                                if (i_instr.imm & 0x800) 
-                                    main_hart.x[i_instr.rd] = (i_instr.imm + main_hart.x[i_instr.rs1]) | 0xFFFFF000;
-                                else 
+                                if (i_instr.imm & 0x800) {
+                                    main_hart.x[i_instr.rd] = (i_instr.imm | 0xFFFFF000) + main_hart.x[i_instr.rs1]; 
+                                } else {
                                     main_hart.x[i_instr.rd] = i_instr.imm + main_hart.x[i_instr.rs1];
+                                }
                                 break;
 
                             case 0b010: // slti
