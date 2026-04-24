@@ -89,7 +89,11 @@ inline static void debug_fn(hart_state_t hart) {
         char buffer[128];
 
         printf("debug> ");
-        fgets(buffer, sizeof buffer, stdin);
+        if (fgets(buffer, sizeof buffer, stdin) == NULL) {
+            printf("fread has returned NULL\n");
+            return;
+        }
+        if (buffer[0] == '\n') continue;
         buffer[strcspn(buffer, "\n")] = 0;
 
         char *command = strtok(buffer, " ");
@@ -115,6 +119,11 @@ inline static void debug_fn(hart_state_t hart) {
     
 }
 
+inline static uint32_t extend_sign(uint32_t value) {
+    if (value & 0x800) return value | 0xFFFFF000;
+    else return value;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Usage: riscv-emul [bin file name] (d)\n");
@@ -130,15 +139,20 @@ int main(int argc, char **argv) {
     fseek(file, 0, SEEK_END);
     size_t file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    printf("File size: %zu\n", file_size);
 
     uint32_t *program = malloc(file_size);
     if (program == NULL) {
         fclose(file);
         printf("Can't allocate memory\n");
+        return 1;
     }
 
-    fread(program, 1, file_size, file);
+    if (fread(program, 1, file_size, file) != file_size) {
+        printf("can't properly read file\n");
+        fclose(file);
+        free(program);
+        return 1;
+    }
     fclose(file);
 
     hart_state_t main_hart;
@@ -150,6 +164,7 @@ int main(int argc, char **argv) {
     i_instruction_t i_instr;
     s_instruction_t s_instr;
     u_instruction_t u_instr;
+    uint32_t temp;
 
     bool debug = false;
     if (argc > 2) {
@@ -163,81 +178,178 @@ int main(int argc, char **argv) {
         uint8_t opcode = instruction & 0x7F;
         
         switch (opcode & 0b11) {
+            /* This case is respobsible for all 32-bit lenght instructions */
             case 0b11:
+
+                /* because the lower 2 bits of an opcode determine the instruction lenght,
+                   We don't need them anymore - we are inside of case, where all of the 
+                   instructions are 32-bit in length. Thus, code below don't need these bits */ 
                 switch ((opcode >> 2) & 0x1F) {
-                    case 0b01101: // lui
+
+                    /* The lui instruction */
+                    case 0b01101:
                         u_instr = fetch_u(instruction);
                         if (u_instr.rd == 0) break;
                         main_hart.x[u_instr.rd] = u_instr.imm << 12;
                         break;
                     
-                    case 0b00101: // auipc
-                        u_instruction_t u_instr = fetch_u(instruction);
+                    /* The aupic instruction */
+                    case 0b00101:
+                        u_instr = fetch_u(instruction);
                         main_hart.pc += u_instr.imm << 12;
                         break;
 
-                    case 0b00100: // immediate int instr
+                    /* The next case is responsible for a lot of I-type instructions */
+                    /* They differ by the "funct" parameter */
+                    case 0b00100:
                         i_instr = fetch_i(instruction);
                         if (i_instr.rd == 0) break;
 
+                        /* The addi instruction */
                         switch (i_instr.funct3 & 0b111) {
-                            case 0b000: // addi
-                                if (i_instr.imm & 0x800) {
-                                    main_hart.x[i_instr.rd] = (i_instr.imm | 0xFFFFF000) + main_hart.x[i_instr.rs1]; 
-                                } else {
-                                    main_hart.x[i_instr.rd] = i_instr.imm + main_hart.x[i_instr.rs1];
-                                }
-                                break;
 
-                            case 0b010: // slti
+                            /* The addi instruction */
+                            case 0b000:
+                                main_hart.x[i_instr.rd] = extend_sign(i_instr.imm) + main_hart.x[i_instr.rs1];
+                                break;
+                            
+                            /* The slti instruction */
+                            case 0b010:
                                 if ((int32_t)main_hart.x[i_instr.rs1] <
-                                    (int32_t)i_instr.imm)
+                                    (int32_t)extend_sign(i_instr.imm))
                                     main_hart.x[i_instr.rd] = 1;
                                 else
                                     main_hart.x[i_instr.rd] = 0;
                                 break;
-
-                            case 0b011: // sltiu
+                            
+                            /* The sltiu instruction */
+                            case 0b011:
                                 if (main_hart.x[i_instr.rs1] <
                                     i_instr.imm)
                                     main_hart.x[i_instr.rd] = 1;
                                 else
                                     main_hart.x[i_instr.rd] = 0;
                                 break;
-
-                            case 0b100: // xori
+                            
+                            /* The xori instruction */
+                            case 0b100:
                                 main_hart.x[i_instr.rd] = i_instr.imm ^ main_hart.x[i_instr.rs1];
                                 break;
 
-                            case 0b110: // ori
+                            /* The ori instruction */
+                            case 0b110:
                                 main_hart.x[i_instr.rd] = i_instr.imm | main_hart.x[i_instr.rs1];
                                 break;
-
-                            case 0b111: // andi
+                            
+                            /* The andi instruction */
+                            case 0b111:
                                 main_hart.x[i_instr.rd] = i_instr.imm & main_hart.x[i_instr.rs1];
                                 break;
 
-                            case 0b001: // slli
+                            /* The slli instruction */
+                            case 0b001:
                                 main_hart.x[i_instr.rd] = main_hart.x[i_instr.rs1] << (i_instr.imm & 0x1F);
                                 break;
-                                
-                            case 0b101: // srli / srai
+                            
+                            /* The next case is responsible for two instructions: srli and srai */
+                            /* they differ by the highest 5 bits of "imm" value */
+                            case 0b101:
                                 switch (i_instr.imm >> 7) {
-                                    case 0b00000: // srli
+                                    /* The srli instruction */
+                                    case 0b00000:
                                         main_hart.x[i_instr.rd] = main_hart.x[i_instr.rs1] >> (i_instr.imm & 0x1F);
                                         break;
-                                    case 0b01000: // srai
+
+                                    /* The srai instruction */
+                                    case 0b01000:
                                         main_hart.x[i_instr.rd] = (int32_t)main_hart.x[i_instr.rs1] >> (i_instr.imm & 0x1F);
                                         break;
                                 }
                                 break;
                         }
+                    /* The end of case that is responsible for a lot of I-type instructions */
                         break;
+
+                    /* This case is responsible for a lot of R-type instructions */
+                    case 0b01100:
+                        r_instr = fetch_r(instruction);
+                        if (r_instr.rd == 0) break;
+
+                        switch (r_instr.funct7) {
+                            case 0b0000000:
+                                switch (r_instr.funct3) {
+                                    /* The add instruction */
+                                    case 0b000:
+                                        main_hart.x[r_instr.rd] = main_hart.x[r_instr.rs1] + main_hart.x[r_instr.rs2];
+                                        break;
+                                    
+                                    /* The sll instrucion */
+                                    case 0b001:
+                                        main_hart.x[r_instr.rd] = main_hart.x[r_instr.rs1] << (main_hart.x[r_instr.rs2] & 0b11111);
+                                        break;
+
+                                    /* The slt instruction*/
+                                    case 0b010:
+                                        if ((int32_t)main_hart.x[r_instr.rs1] < (int32_t)main_hart.x[r_instr.rs2]) {
+                                            main_hart.x[r_instr.rd] = 1;
+                                        } else {
+                                            main_hart.x[r_instr.rd] = 0;
+                                        }
+                                        break;
+
+                                    /* The sltu instruction */
+                                    case 0b011:
+                                        if (main_hart.x[r_instr.rs1] < main_hart.x[r_instr.rs2]) {
+                                            main_hart.x[r_instr.rd] = 1;
+                                        } else {
+                                            main_hart.x[r_instr.rd] = 0;
+                                        }
+                                        break;
+                                        
+                                    /* The xor instruction*/
+                                    case 0b100:
+                                        main_hart.x[r_instr.rd] = main_hart.x[r_instr.rs1] ^ main_hart.x[r_instr.rs2];
+                                        break;
+
+                                    /* The srl instruction*/
+                                    case 0b101:
+                                        main_hart.x[r_instr.rd] = main_hart.x[r_instr.rs1] >> (main_hart.x[r_instr.rs2] & 0b11111);
+                                        break;
+                                    
+                                    /* The or instruction */
+                                    case 0b110:
+                                        main_hart.x[r_instr.rd] = main_hart.x[r_instr.rs1] | main_hart.x[r_instr.rs2];
+                                        break;
+
+                                    /* The and instruction */
+                                    case 0b111:
+                                        main_hart.x[r_instr.rd] = main_hart.x[r_instr.rs1] & main_hart.x[r_instr.rs2];
+                                        break;
+
+                                }
+                                break;
+                            
+                            case 0b100000:
+                                switch (r_instr.funct3) {
+                                    /* The sub instruction */
+                                    case 0b000:
+                                        main_hart.x[r_instr.rd] = main_hart.x[r_instr.rs1] - main_hart.x[r_instr.rs2];
+                                        break;
+
+                                    /* The sra instruction */
+                                    case 0b101:
+                                        main_hart.x[r_instr.rd] = (int32_t)main_hart.x[r_instr.rs1] >> ((int32_t)main_hart.x[r_instr.rs2] & 0b11111);
+                                        break;
+                                }
+                                break;
+                            
+                        }
+                    // new cases here
                 }
                 break;
             default:
                 printf("16-bit instrucions are not supported right now\n");
-                break;
+                return 1;
         }
 
         if (debug) debug_fn(main_hart);
