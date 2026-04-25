@@ -40,6 +40,12 @@ typedef struct {
     uint32_t pc;
 } hart_state_t;
 
+typedef struct {
+    char file_name[256];
+    bool debug;
+    size_t ram_size;
+} flags_t;
+
 r_instruction_t fetch_r(uint32_t instruction) {
     r_instruction_t new_instruction;
 
@@ -69,8 +75,8 @@ s_instruction_t fetch_s(uint32_t instruction) {
     new_instruction.funct3 = (instruction >> 12) & 0x07;
     new_instruction.rs1    = (instruction >> 15) & 0x1F;
     new_instruction.rs2    = (instruction >> 20) & 0x1F;
-    new_instruction.imm    = (instruction >> 7)  & 0x1F
-                           | (instruction >> 20) & 0x7E0;
+    new_instruction.imm    = ((instruction >> 7)  & 0x1F)
+                           | ((instruction >> 20) & 0x7E0);
 
     return new_instruction;
 }
@@ -124,15 +130,57 @@ inline static uint32_t extend_sign(uint32_t value) {
     else return value;
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        printf("Usage: riscv-emul [bin file name] (d)\n");
-        return 1;
+inline static flags_t parse_flags(int argc, char **argv) {
+    flags_t flags;
+    flags.ram_size = 0;
+    bool found_filename = false;
+    bool found_ram_size = false;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-d") == 0) {
+            flags.debug = true;
+        } else if (strcmp(argv[i], "-n") == 0) {
+            if (argc - 1 == i) {
+                printf("Expected filename after -n option\n");
+                exit(1);
+            }
+
+            i++;
+            strcpy(flags.file_name, argv[i]);
+            found_filename = true;
+        } else if (strcmp(argv[i], "-m") == 0) {
+            if (argc - 1 == i) {
+                printf("Expected ram size after -m option\n");
+                exit(1);
+            }
+
+            i++;
+            flags.ram_size = atoi(argv[i]); // TO DO: swap atoi for a more reliable function
+            found_ram_size = true;
+        } else {
+            printf("Invalid command line argument: %s\n", argv[i]);
+            exit(1);
+        }
     }
 
-    FILE *file = fopen(argv[1], "rb");
+    if (!(found_filename)) {
+        printf("Fatal: no filename specified\n");
+        exit(1);
+    }
+
+    if (!(found_ram_size)) {
+        printf("Warning: no ram size was specified. If the code uses stack or heap it will lead to fatal error\n");
+    }
+
+    return flags;
+}
+
+int main(int argc, char **argv) {
+    flags_t flags = parse_flags(argc, argv);
+
+    FILE *file = fopen(flags.file_name, "rb");
     if (file == NULL) {
-        printf("Can't open file: %s\n", argv[1]);
+        printf("Can't open file: %s\n", flags.file_name);
         return 1;
     }
 
@@ -140,41 +188,37 @@ int main(int argc, char **argv) {
     size_t file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    uint32_t *program = malloc(file_size);
+    uint8_t *program = malloc(file_size + flags.ram_size);
     if (program == NULL) {
         fclose(file);
         printf("Can't allocate memory\n");
         return 1;
     }
 
-    if (fread(program, 1, file_size, file) != file_size) {
+    uint32_t *code = (uint32_t*)program;
+    uint8_t *ram = program + file_size;
+    memset(ram, 0, flags.ram_size);
+
+    if (fread(code, 1, file_size, file) != file_size) {
         printf("can't properly read file\n");
         fclose(file);
-        free(program);
+        free(code);
         return 1;
     }
     fclose(file);
 
     hart_state_t main_hart;
     main_hart.pc = 0;
-    main_hart.x[0];
     memset(main_hart.x, 0, sizeof main_hart.x);
 
     r_instruction_t r_instr;
     i_instruction_t i_instr;
     s_instruction_t s_instr;
     u_instruction_t u_instr;
-    uint32_t temp;
-
-    bool debug = false;
-    if (argc > 2) {
-        if (strcmp(argv[2], "d") == 0)
-            debug = true;
-    }
 
     while (main_hart.pc < (file_size / 4)) {
 
-        uint32_t instruction = program[main_hart.pc];
+        uint32_t instruction = code[main_hart.pc];
         uint8_t opcode = instruction & 0x7F;
         
         switch (opcode & 0b11) {
@@ -352,11 +396,11 @@ int main(int argc, char **argv) {
                 return 1;
         }
 
-        if (debug) debug_fn(main_hart);
+        if (flags.debug) debug_fn(main_hart);
 
         main_hart.pc++;
     }
 
-    free(program);
+    free(code);
     return 0;
 }
