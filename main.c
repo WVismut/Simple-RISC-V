@@ -47,10 +47,13 @@ typedef struct {
     uint32_t pc;
 } hart_state_t;
 
+typedef enum { ELF, BIN } filetype_t;
+
 typedef struct {
     char file_name[256];
     bool debug;
     size_t ram_size;
+    filetype_t filetype;
 } flags_t;
 
 r_instruction_t fetch_r(uint32_t instruction) {
@@ -151,6 +154,7 @@ inline static flags_t parse_flags(int argc, char **argv) {
     flags.ram_size      = 0;
     bool found_filename = false;
     bool found_ram_size = false;
+    bool found_filetype = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-d") == 0) {
@@ -173,6 +177,26 @@ inline static flags_t parse_flags(int argc, char **argv) {
             i++;
             flags.ram_size = strtol(argv[i], &endptr, 10);
             found_ram_size = true;
+        } else if (strcmp(argv[i], "-f") == 0) {
+            if (argc - 1 == i) {
+                printf("Expected filetype after -f option\n");
+                exit(1);
+            }
+
+            i++;
+            if (strcmp(argv[i], "elf") == 0) {
+                flags.filetype = ELF;
+            } else if (strcmp(argv[i], "bin") == 0) {
+                flags.filetype = BIN;
+            } else {
+                printf(
+                    "No such filetype: %s\n"
+                    "Excpected one of these: elf, bin",
+                    argv[i]
+                );
+            }
+
+            found_filetype = true;
         } else {
             printf("Invalid command line argument: %s\n", argv[i]);
             exit(1);
@@ -187,6 +211,11 @@ inline static flags_t parse_flags(int argc, char **argv) {
     if (!(found_ram_size)) {
         printf("Warning: no ram size was specified. If the code uses stack or "
                "heap it will lead to fatal error\n");
+    }
+
+    if (!(found_filetype)) {
+        printf("Warning: no filetype was specified. Defaulting to bin\n");
+        flags.filetype = BIN;
     }
 
     return flags;
