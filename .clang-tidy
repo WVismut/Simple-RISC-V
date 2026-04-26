@@ -1,0 +1,20 @@
+Checks: >
+  -*,
+  bugprone-*,
+  readability-*,
+  misc-*,
+  clang-analyzer-*,
+  cert-*,
+
+  -bugprone-easily-swappable-parameters,
+  -bugprone-switch-missing-default-case,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -cert-msc30-c,
+  -cert-msc32-c
+
+CheckOptions:
+  - key: clang-analyzer.maxLoopUnrollCount
+    value: '4'

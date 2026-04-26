@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "/home/fluttershy/c/riscv-emul",
+    "command": "clang -c main.c -o main.o -Wall -Wextra -std=c17 -I.",
+    "file": "main.c"
+  }
+]

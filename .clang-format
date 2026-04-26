@@ -1,0 +1,34 @@
+BasedOnStyle: LLVM
+ColumnLimit: 100
+IndentWidth: 4
+UseTab: Never
+
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<[^.]+\.h>'
+    Priority: 1
+  - Regex: '^<.*/'
+    Priority: 2
+  - Regex: '^"(.*)/'
+    Priority: 3
+  - Regex: '^"'
+    Priority: 4
+
+AlignAfterOpenBracket: BlockIndent
+AlignOperands: true
+AlignConsecutiveAssignments: true
+AlignConsecutiveMacros: true
+
+InsertBraces: true
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+PointerAlignment: Right
+SpaceAfterCStyleCast: true
+
+PenaltyBreakAssignment: 50
+PenaltyReturnTypeOnItsOwnLine: 1000
+
+InsertNewlineAtEOF: true

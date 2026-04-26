@@ -1,0 +1,1 @@
+clang main.c -o main -fsanitize=address,undefined -Wimplicit-fallthrough -Wall -Wextra -Wshadow -g -std=c17 $*
