@@ -5,6 +5,7 @@
     casting to void is used to silence warnings from that expressions when use clang-tidy
 */
 
+#include <elf.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -47,14 +48,17 @@ typedef struct {
     uint32_t pc;
 } hart_state_t;
 
-typedef enum { ELF, BIN } filetype_t;
-
 typedef struct {
     char file_name[256];
     bool debug;
     size_t ram_size;
-    filetype_t filetype;
 } flags_t;
+
+typedef struct {
+    void *vm_memory;
+    uint32_t translation_offset;
+    uint32_t memory_size;
+} memory_config_t;
 
 r_instruction_t fetch_r(uint32_t instruction) {
     r_instruction_t new_instruction;
@@ -154,7 +158,6 @@ inline static flags_t parse_flags(int argc, char **argv) {
     flags.ram_size      = 0;
     bool found_filename = false;
     bool found_ram_size = false;
-    bool found_filetype = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-d") == 0) {
@@ -177,26 +180,6 @@ inline static flags_t parse_flags(int argc, char **argv) {
             i++;
             flags.ram_size = strtol(argv[i], &endptr, 10);
             found_ram_size = true;
-        } else if (strcmp(argv[i], "-f") == 0) {
-            if (argc - 1 == i) {
-                printf("Expected filetype after -f option\n");
-                exit(1);
-            }
-
-            i++;
-            if (strcmp(argv[i], "elf") == 0) {
-                flags.filetype = ELF;
-            } else if (strcmp(argv[i], "bin") == 0) {
-                flags.filetype = BIN;
-            } else {
-                printf(
-                    "No such filetype: %s\n"
-                    "Excpected one of these: elf, bin",
-                    argv[i]
-                );
-            }
-
-            found_filetype = true;
         } else {
             printf("Invalid command line argument: %s\n", argv[i]);
             exit(1);
@@ -213,57 +196,103 @@ inline static flags_t parse_flags(int argc, char **argv) {
                "heap it will lead to fatal error\n");
     }
 
-    if (!(found_filetype)) {
-        printf("Warning: no filetype was specified. Defaulting to bin\n");
-        flags.filetype = BIN;
+    return flags;
+}
+
+inline static memory_config_t setup_memory(char *filename) {
+    // what function will return
+    memory_config_t memory_config;
+
+    // open file
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL) {
+        printf("Can't open file: %s\n", filename);
+        exit(1);
     }
 
-    return flags;
+    // load & parse elf header
+    Elf32_Ehdr elf_header;
+    if (fread(&elf_header, sizeof elf_header, 1, file) != 1) {
+        printf("Can't read elf header\n");
+        exit(1);
+    }
+
+    // load & parse program headers
+    Elf32_Phdr *program_headers = malloc((long) elf_header.e_phnum * elf_header.e_phentsize);
+
+    if (fseek(file, elf_header.e_phoff, SEEK_SET) != 0) {
+        printf("fseek return non zero value\n");
+        exit(1);
+    }
+
+    if (fread(program_headers, (long) elf_header.e_phnum * elf_header.e_phentsize, 1, file) != 1) {
+        printf("fread retrun error\n");
+        exit(1);
+    }
+
+    // find the right ammount of memory for vm
+    uint32_t min_address = 0xFFFFFFFF; // vaddr // this is also offset for translation
+    uint32_t max_address = 0;          // vaddr + memsz
+
+    // i = 1 is temporary. Everything breaks when i = 0
+    for (int i = 2; i < elf_header.e_phnum; i++) {
+        Elf32_Phdr phdr = program_headers[i];
+
+        if (phdr.p_type == PT_LOAD) {
+            if (phdr.p_vaddr < min_address) {
+                min_address = phdr.p_vaddr;
+            }
+
+            if (phdr.p_vaddr + phdr.p_memsz > max_address) {
+                max_address = phdr.p_vaddr + phdr.p_memsz;
+            }
+        }
+    }
+
+    // allocate enough memory
+    void *vm_memory = malloc(max_address - min_address);
+    if (vm_memory == NULL) {
+        printf("malloc returned null\n");
+        exit(1);
+    }
+    memset(vm_memory, 0, max_address - min_address);
+
+    // load segments in memory
+    // i = 1 is temporary. Everything breaks when i = 0
+    for (int i = 2; i < elf_header.e_phnum; i++) {
+        Elf32_Phdr phdr = program_headers[i];
+
+        if (phdr.p_type == PT_LOAD) {
+            if (fseek(file, phdr.p_offset, SEEK_SET) != 0) {
+                printf("fseek returned non zero value");
+                exit(1);
+            }
+
+            if (fread(&vm_memory[phdr.p_vaddr - min_address], phdr.p_filesz, 1, file) != 1) {
+                printf("fread retruned error\n");
+                exit(1);
+            }
+        }
+    }
+
+    // clean
+    free(program_headers);
+
+    // retrun
+    memory_config.memory_size        = max_address - min_address;
+    memory_config.vm_memory          = vm_memory;
+    memory_config.translation_offset = min_address;
+    return memory_config;
+}
+
+inline static uint32_t translate_address(uint32_t address, uint32_t offset) {
+    return address - offset;
 }
 
 int main(int argc, char **argv) {
     flags_t flags = parse_flags(argc, argv);
 
-    FILE *file = fopen(flags.file_name, "rb");
-    if (file == NULL) {
-        printf("Can't open file: %s\n", flags.file_name);
-        return 1;
-    }
-
-    if (fseek(file, 0, SEEK_END) != 0) {
-        printf("fseek returned non null value\n");
-        return 1;
-    }
-
-    size_t file_size = ftell(file);
-
-    if (fseek(file, 0, SEEK_SET) != 0) {
-        printf("fseek returned non null value\n");
-        return 1;
-    }
-
-    uint8_t *program = malloc(file_size + flags.ram_size);
-    if (program == NULL) {
-        (void) fclose(file);
-        printf("Can't allocate memory\n");
-        return 1;
-    }
-
-    uint32_t *code = (uint32_t *) program;
-    uint8_t *ram   = program + file_size;
-    memset(ram, 0, flags.ram_size);
-
-    if (fread(code, 1, file_size, file) != file_size) {
-        printf("can't properly read file\n");
-        (void) fclose(file);
-        free(code);
-        return 1;
-    }
-
-    if (fclose(file) != 0) {
-        printf("Error closing file!\n");
-        return 1;
-    }
+    memory_config_t memory_config = setup_memory(flags.file_name);
 
     hart_state_t main_hart;
     main_hart.pc = 0;
@@ -274,9 +303,9 @@ int main(int argc, char **argv) {
     s_instruction_t s_instr;
     u_instruction_t u_instr;
 
-    while (main_hart.pc < (file_size / 4)) {
+    while (main_hart.pc < (memory_config.memory_size / 4)) {
 
-        uint32_t instruction = code[main_hart.pc];
+        uint32_t instruction = ((uint32_t *) memory_config.vm_memory)[main_hart.pc];
         uint8_t opcode       = instruction & 0x7F;
 
         switch (opcode & 0b11) {
@@ -478,6 +507,6 @@ int main(int argc, char **argv) {
         main_hart.pc++;
     }
 
-    free(code);
+    free(memory_config.vm_memory);
     return 0;
 }
