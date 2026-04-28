@@ -58,6 +58,8 @@ typedef struct {
     void *vm_memory;
     uint32_t translation_offset;
     uint32_t memory_size;
+    uint32_t code_segment_min;
+    uint32_t code_segment_max;
 } memory_config_t;
 
 r_instruction_t fetch_r(uint32_t instruction) {
@@ -109,7 +111,7 @@ inline static void debug_fn(hart_state_t hart) {
 
         printf("debug> ");
         if (fgets(buffer, sizeof buffer, stdin) == NULL) {
-            printf("fread has returned NULL\n");
+            printf("Fatal: fread has returned NULL\n");
             return;
         }
         if (buffer[0] == '\n') {
@@ -139,7 +141,7 @@ inline static void debug_fn(hart_state_t hart) {
         } else if (strcmp(command, "exit") == 0) {
             exit(0);
         } else {
-            printf("Invalid command: %s\n", command);
+            printf("Fatal: Invalid command: %s\n", command);
         }
     }
 }
@@ -164,7 +166,7 @@ inline static flags_t parse_flags(int argc, char **argv) {
             flags.debug = true;
         } else if (strcmp(argv[i], "-n") == 0) {
             if (argc - 1 == i) {
-                printf("Expected filename after -n option\n");
+                printf("Fatal: Expected filename after -n option\n");
                 exit(1);
             }
 
@@ -173,7 +175,7 @@ inline static flags_t parse_flags(int argc, char **argv) {
             found_filename = true;
         } else if (strcmp(argv[i], "-m") == 0) {
             if (argc - 1 == i) {
-                printf("Expected ram size after -m option\n");
+                printf("Fatal: Expected ram size after -m option\n");
                 exit(1);
             }
 
@@ -181,7 +183,7 @@ inline static flags_t parse_flags(int argc, char **argv) {
             flags.ram_size = strtol(argv[i], &endptr, 10);
             found_ram_size = true;
         } else {
-            printf("Invalid command line argument: %s\n", argv[i]);
+            printf("Fatal: Invalid command line argument: %s\n", argv[i]);
             exit(1);
         }
     }
@@ -203,17 +205,19 @@ inline static memory_config_t setup_memory(char *filename) {
     // what function will return
     memory_config_t memory_config;
 
+    memory_config.code_segment_max = 0;
+
     // open file
     FILE *file = fopen(filename, "rb");
     if (file == NULL) {
-        printf("Can't open file: %s\n", filename);
+        printf("Fatal: Can't open file: %s\n", filename);
         exit(1);
     }
 
     // load & parse elf header
     Elf32_Ehdr elf_header;
     if (fread(&elf_header, sizeof elf_header, 1, file) != 1) {
-        printf("Can't read elf header\n");
+        printf("Fatal: Can't read elf header\n");
         exit(1);
     }
 
@@ -221,12 +225,12 @@ inline static memory_config_t setup_memory(char *filename) {
     Elf32_Phdr *program_headers = malloc((long) elf_header.e_phnum * elf_header.e_phentsize);
 
     if (fseek(file, elf_header.e_phoff, SEEK_SET) != 0) {
-        printf("fseek return non zero value\n");
+        printf("Fatal: fseek return non zero value\n");
         exit(1);
     }
 
     if (fread(program_headers, (long) elf_header.e_phnum * elf_header.e_phentsize, 1, file) != 1) {
-        printf("fread retrun error\n");
+        printf("Fatal: fread retrun error\n");
         exit(1);
     }
 
@@ -234,7 +238,7 @@ inline static memory_config_t setup_memory(char *filename) {
     uint32_t min_address = 0xFFFFFFFF; // vaddr // this is also offset for translation
     uint32_t max_address = 0;          // vaddr + memsz
 
-    // i = 1 is temporary. Everything breaks when i = 0
+    // i = 2 is temporary. Everything breaks when i = 0
     for (int i = 2; i < elf_header.e_phnum; i++) {
         Elf32_Phdr phdr = program_headers[i];
 
@@ -246,30 +250,44 @@ inline static memory_config_t setup_memory(char *filename) {
             if (phdr.p_vaddr + phdr.p_memsz > max_address) {
                 max_address = phdr.p_vaddr + phdr.p_memsz;
             }
+
+            // find the code segment
+            if (phdr.p_flags & 1) {
+                memory_config.code_segment_min = phdr.p_vaddr;
+                memory_config.code_segment_max = phdr.p_vaddr + phdr.p_memsz;
+            }
         }
     }
+
+    if (memory_config.code_segment_max == 0) {
+        printf("Fatal: Didn't find the code segment\n");
+        exit(1);
+    }
+
+    memory_config.code_segment_min = memory_config.code_segment_min - min_address;
+    memory_config.code_segment_max = memory_config.code_segment_max - min_address;
 
     // allocate enough memory
     void *vm_memory = malloc(max_address - min_address);
     if (vm_memory == NULL) {
-        printf("malloc returned null\n");
+        printf("Fatal: malloc returned null\n");
         exit(1);
     }
     memset(vm_memory, 0, max_address - min_address);
 
     // load segments in memory
-    // i = 1 is temporary. Everything breaks when i = 0
+    // i = 2 is temporary. Everything breaks when i = 0
     for (int i = 2; i < elf_header.e_phnum; i++) {
         Elf32_Phdr phdr = program_headers[i];
 
         if (phdr.p_type == PT_LOAD) {
             if (fseek(file, phdr.p_offset, SEEK_SET) != 0) {
-                printf("fseek returned non zero value");
+                printf("Fatal: fseek returned non zero value");
                 exit(1);
             }
 
             if (fread(&vm_memory[phdr.p_vaddr - min_address], phdr.p_filesz, 1, file) != 1) {
-                printf("fread retruned error\n");
+                printf("Fatal: fread retruned error\n");
                 exit(1);
             }
         }
@@ -295,7 +313,7 @@ int main(int argc, char **argv) {
     memory_config_t memory_config = setup_memory(flags.file_name);
 
     hart_state_t main_hart;
-    main_hart.pc = 0;
+    main_hart.pc = memory_config.code_segment_min / 4;
     memset(main_hart.x, 0, sizeof main_hart.x);
 
     r_instruction_t r_instr;
@@ -303,7 +321,7 @@ int main(int argc, char **argv) {
     s_instruction_t s_instr;
     u_instruction_t u_instr;
 
-    while (main_hart.pc < (memory_config.memory_size / 4)) {
+    while (main_hart.pc < (memory_config.code_segment_max / 4)) {
 
         uint32_t instruction = ((uint32_t *) memory_config.vm_memory)[main_hart.pc];
         uint8_t opcode       = instruction & 0x7F;
@@ -496,7 +514,8 @@ int main(int argc, char **argv) {
             }
             break;
         default:
-            printf("16-bit instrucions are not supported right now\n");
+            free(memory_config.vm_memory);
+            printf("Fatal: 16-bit instrucions are not supported right now\n");
             return 1;
         }
 
