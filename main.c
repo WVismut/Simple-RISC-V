@@ -125,7 +125,7 @@ inline static void debug_fn(hart_state_t hart) {
         if (strcmp(command, "reg") == 0) {
             while ((reg = strtok(NULL, " ")) != NULL) {
                 if (strcmp(reg, "pc") == 0) {
-                    printf("pc = %d\n", hart.pc);
+                    printf("pc = 0x%x\n", hart.pc);
                 } else if (reg[0] == 'x') {
                     char *reg_num_ptr = &reg[1];
                     int reg_num       = (int) strtol(reg_num_ptr, &endptr, 10);
@@ -204,7 +204,6 @@ inline static flags_t parse_flags(int argc, char **argv) {
 inline static memory_config_t setup_memory(char *filename) {
     // what function will return
     memory_config_t memory_config;
-
     memory_config.code_segment_max = 0;
 
     // open file
@@ -300,11 +299,10 @@ inline static memory_config_t setup_memory(char *filename) {
     memory_config.memory_size        = max_address - min_address;
     memory_config.vm_memory          = vm_memory;
     memory_config.translation_offset = min_address;
+    printf("Min memory: 0x%x\n", min_address);
+    printf("Max memory: 0x%x\n", max_address);
+    printf("Size: 0x%x\n", max_address - min_address);
     return memory_config;
-}
-
-inline static uint32_t translate_address(uint32_t address, uint32_t offset) {
-    return address - offset;
 }
 
 int main(int argc, char **argv) {
@@ -320,11 +318,13 @@ int main(int argc, char **argv) {
     i_instruction_t i_instr;
     s_instruction_t s_instr;
     u_instruction_t u_instr;
+    uint32_t temp;
 
-    while (main_hart.pc < (memory_config.code_segment_max / 4)) {
+    while (main_hart.pc < memory_config.code_segment_max) {
 
-        uint32_t instruction = ((uint32_t *) memory_config.vm_memory)[main_hart.pc];
+        uint32_t instruction = ((uint32_t *) memory_config.vm_memory)[main_hart.pc / 4];
         uint8_t opcode       = instruction & 0x7F;
+        printf("opcode: %x\n", opcode);
 
         switch (opcode & 0b11) {
         /* This case is respobsible for all 32-bit lenght instructions */
@@ -334,7 +334,7 @@ int main(int argc, char **argv) {
                lenght, We don't need them anymore - we are inside of case, where
                all of the instructions are 32-bit in length. Thus, code below
                don't need these bits */
-            switch ((opcode >> 2) & 0x1F) {
+            switch (opcode >> 2) {
 
             /* The lui instruction */
             case 0b01101:
@@ -345,10 +345,10 @@ int main(int argc, char **argv) {
                 main_hart.x[u_instr.rd] = u_instr.imm << 12;
                 break;
 
-            /* The aupic instruction */
+            /* The auipc instruction */
             case 0b00101:
                 u_instr = fetch_u(instruction);
-                main_hart.pc += u_instr.imm << 12;
+                main_hart.x[u_instr.rd] = (u_instr.imm << 12) + main_hart.pc + memory_config.translation_offset;
                 break;
 
             /* The next case is responsible for a lot of I-type instructions */
@@ -510,12 +510,33 @@ int main(int argc, char **argv) {
                     }
                     break;
                 }
-                // new cases here
+                break;
+
+            /* This case is responsible for memory manipulation */
+            case 0b00000:
+                i_instr = fetch_i(instruction);
+
+                switch (i_instr.funct3) {
+                /* The lb instruction */
+                    case 0b000:
+
+                        temp = extend_sign(i_instr.imm) + main_hart.x[i_instr.rs1] - memory_config.translation_offset;
+
+                        if (temp >= memory_config.memory_size) {
+                            printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
+                            free(memory_config.vm_memory);
+                            return 1;
+                        }
+
+                        main_hart.x[i_instr.rd] = extend_sign(((uint8_t*)memory_config.vm_memory)[temp]);
+                        break;
+                }
+                break;
             }
             break;
         default:
             free(memory_config.vm_memory);
-            printf("Fatal: 16-bit instrucions are not supported right now\n");
+            printf("Fatal: 16-bit instructions are not supported right now\n");
             return 1;
         }
 
@@ -523,7 +544,7 @@ int main(int argc, char **argv) {
             debug_fn(main_hart);
         }
 
-        main_hart.pc++;
+        main_hart.pc += 4;
     }
 
     free(memory_config.vm_memory);
