@@ -146,9 +146,25 @@ inline static void debug_fn(hart_state_t hart) {
     }
 }
 
-inline static uint32_t extend_sign(uint32_t value) {
+inline static uint32_t extend_sign_8(uint32_t value) {
+    if (value & 0x80) {
+        return value | 0xFFFFFF00;
+    }
+
+    return value;
+}
+
+inline static uint32_t extend_sign_12(uint32_t value) {
     if (value & 0x800) {
         return value | 0xFFFFF000;
+    }
+
+    return value;
+}
+
+inline static uint32_t extend_sign_16(uint32_t value) {
+    if (value & 0x8000) {
+        return value | 0xFFFF0000;
     }
 
     return value;
@@ -299,9 +315,6 @@ inline static memory_config_t setup_memory(char *filename) {
     memory_config.memory_size        = max_address - min_address;
     memory_config.vm_memory          = vm_memory;
     memory_config.translation_offset = min_address;
-    printf("Min memory: 0x%x\n", min_address);
-    printf("Max memory: 0x%x\n", max_address);
-    printf("Size: 0x%x\n", max_address - min_address);
     return memory_config;
 }
 
@@ -347,8 +360,9 @@ int main(int argc, char **argv) {
 
             /* The auipc instruction */
             case 0b00101:
-                u_instr = fetch_u(instruction);
-                main_hart.x[u_instr.rd] = (u_instr.imm << 12) + main_hart.pc + memory_config.translation_offset;
+                u_instr                 = fetch_u(instruction);
+                main_hart.x[u_instr.rd] = (u_instr.imm << 12) + main_hart.pc +
+                                          memory_config.translation_offset;
                 break;
 
             /* The next case is responsible for a lot of I-type instructions */
@@ -364,12 +378,14 @@ int main(int argc, char **argv) {
 
                 /* The addi instruction */
                 case 0b000:
-                    main_hart.x[i_instr.rd] = extend_sign(i_instr.imm) + main_hart.x[i_instr.rs1];
+                    main_hart.x[i_instr.rd] = extend_sign_12(i_instr.imm) +
+                                              main_hart.x[i_instr.rs1];
                     break;
 
                 /* The slti instruction */
                 case 0b010:
-                    if ((int32_t) main_hart.x[i_instr.rs1] < (int32_t) extend_sign(i_instr.imm)) {
+                    if ((int32_t) main_hart.x[i_instr.rs1] <
+                        (int32_t) extend_sign_12(i_instr.imm)) {
                         main_hart.x[i_instr.rd] = 1;
                     } else {
                         main_hart.x[i_instr.rd] = 0;
@@ -517,19 +533,90 @@ int main(int argc, char **argv) {
                 i_instr = fetch_i(instruction);
 
                 switch (i_instr.funct3) {
-                /* The lb instruction */
-                    case 0b000:
+                    /* The lb instruction */
+                case 0b000:
 
-                        temp = extend_sign(i_instr.imm) + main_hart.x[i_instr.rs1] - memory_config.translation_offset;
+                    temp = extend_sign_12(i_instr.imm) + main_hart.x[i_instr.rs1] -
+                           memory_config.translation_offset;
 
-                        if (temp >= memory_config.memory_size) {
-                            printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
-                            free(memory_config.vm_memory);
-                            return 1;
-                        }
+                    if (temp >= memory_config.memory_size) {
+                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
+                        free(memory_config.vm_memory);
+                        return 1;
+                    }
 
-                        main_hart.x[i_instr.rd] = extend_sign(((uint8_t*)memory_config.vm_memory)[temp]);
-                        break;
+                    main_hart.x[i_instr.rd] = extend_sign_8(((uint8_t *) memory_config.vm_memory
+                    )[temp]);
+                    break;
+
+                /* The lh instruction */
+                case 0b001:
+
+                    temp = extend_sign_12(i_instr.imm) + main_hart.x[i_instr.rs1] -
+                           memory_config.translation_offset;
+
+                    if (temp + 1 >= memory_config.memory_size) {
+                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
+                        free(memory_config.vm_memory);
+                        return 1;
+                    }
+
+                    main_hart.x[i_instr.rd] = extend_sign_16(
+                        ((uint8_t *) memory_config.vm_memory)[temp] |
+                        (((uint8_t *) memory_config.vm_memory)[temp + 1] << 8)
+                    );
+                    break;
+
+                /* The lw instruction */
+                case 0b010:
+
+                    temp = extend_sign_12(i_instr.imm) + main_hart.x[i_instr.rs1] -
+                           memory_config.translation_offset;
+
+                    if (temp + 3 >= memory_config.memory_size) {
+                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
+                        free(memory_config.vm_memory);
+                        return 1;
+                    }
+
+                    main_hart.x[i_instr.rd] =
+                        ((uint8_t *) memory_config.vm_memory)[temp] |
+                        (((uint8_t *) memory_config.vm_memory)[temp + 1] << 8) |
+                        (((uint8_t *) memory_config.vm_memory)[temp + 2] << 16) |
+                        (((uint8_t *) memory_config.vm_memory)[temp + 3] << 24);
+                    break;
+
+                /* The lbu instruction */
+                case 0b100:
+
+                    temp = extend_sign_12(i_instr.imm) + main_hart.x[i_instr.rs1] -
+                           memory_config.translation_offset;
+
+                    if (temp >= memory_config.memory_size) {
+                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
+                        free(memory_config.vm_memory);
+                        return 1;
+                    }
+
+                    main_hart.x[i_instr.rd] = ((uint8_t *) memory_config.vm_memory)[temp];
+                    break;
+
+                /* The lhu instruction */
+                case 0b101:
+
+                    temp = extend_sign_12(i_instr.imm) + main_hart.x[i_instr.rs1] -
+                           memory_config.translation_offset;
+
+                    if (temp + 1 >= memory_config.memory_size) {
+                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
+                        free(memory_config.vm_memory);
+                        return 1;
+                    }
+
+                    main_hart.x[i_instr.rd] = ((uint8_t *) memory_config.vm_memory)[temp] |
+                                              (((uint8_t *) memory_config.vm_memory)[temp + 1]
+                                               << 8);
+                    break;
                 }
                 break;
             }
