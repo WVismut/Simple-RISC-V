@@ -105,7 +105,47 @@ u_instruction_t fetch_u(uint32_t instruction) {
     return new_instruction;
 }
 
+/* Basically, J instructions are just drunk U instructions */
+/* Mission of this function is to sober J instr */
+u_instruction_t fetch_j(uint32_t instruction) {
+    u_instruction_t new_instruction;
+
+    new_instruction.rd  = (instruction >> 7) & 0x1F;
+    new_instruction.imm = 0;
+
+    // wth
+    new_instruction.imm |= ((instruction >> 31) & 0x1) << 20;  // imm[20]
+    new_instruction.imm |= ((instruction >> 12) & 0xFF) << 12; // imm[19:12]
+    new_instruction.imm |= ((instruction >> 20) & 0x1) << 11;  // imm[11]
+    new_instruction.imm |= ((instruction >> 21) & 0x3FF) << 1; // imm[10:1]
+
+    return new_instruction;
+}
+
+/* the same thing as fetch_j */
+s_instruction_t fetch_b(uint32_t instruction) {
+    s_instruction_t new_instruction;
+
+    new_instruction.funct3 = (instruction >> 12) & 0x07;
+    new_instruction.rs1    = (instruction >> 15) & 0x1F;
+    new_instruction.rs2    = (instruction >> 20) & 0x1F;
+
+    new_instruction.imm = ((instruction >> 7) & 0x1E) |       // imm[4:1]
+                          ((instruction >> 20) & 0x7E0) |     // imm[10:5]
+                          ((instruction >> 31) & 0x1) << 12 | // imm[12]
+                          ((instruction << 4) & 0x800);       // imm[11]
+
+    return new_instruction;
+}
+
 inline static void debug_fn(hart_state_t hart) {
+    static int to_skip = 0;
+
+    if (to_skip > 0) {
+        to_skip--;
+        return;
+    }
+
     while (true) {
         char buffer[128];
 
@@ -137,6 +177,11 @@ inline static void debug_fn(hart_state_t hart) {
                 }
             }
         } else if (strcmp(command, "step") == 0) {
+            reg = strtok(NULL, " ");
+            if (reg != NULL) {
+                to_skip = (int) strtol(reg, &endptr, 10) - 1;
+            }
+
             return;
         } else if (strcmp(command, "exit") == 0) {
             exit(0);
@@ -165,6 +210,14 @@ inline static uint32_t extend_sign_12(uint32_t value) {
 inline static uint32_t extend_sign_16(uint32_t value) {
     if (value & 0x8000) {
         return value | 0xFFFF0000;
+    }
+
+    return value;
+}
+
+inline static uint32_t extend_sign_20(uint32_t value) {
+    if (value & 0x80000) {
+        return value | 0xFFF00000;
     }
 
     return value;
@@ -301,7 +354,7 @@ inline static memory_config_t setup_memory(char *filename) {
                 exit(1);
             }
 
-            if (fread(&vm_memory[phdr.p_vaddr - min_address], phdr.p_filesz, 1, file) != 1) {
+            if (fread(&((uint8_t *) vm_memory)[phdr.p_vaddr - min_address], phdr.p_filesz, 1, file) != 1) {
                 printf("Fatal: fread retruned error\n");
                 exit(1);
             }
@@ -371,7 +424,6 @@ int main(int argc, char **argv) {
                     break;
                 }
 
-                /* The addi instruction */
                 switch (i_instr.funct3 & 0b111) {
 
                 /* The addi instruction */
@@ -515,57 +567,6 @@ int main(int argc, char **argv) {
                 }
                 break;
 
-            /* This case is responsible for loading things into memory */
-            case 0b01000:
-                s_instr = fetch_s(instruction);
-
-                switch (s_instr.funct3) {
-
-                case 0b000:
-
-                    temp = extend_sign_12(s_instr.imm) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
-
-                    if (temp >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
-                        free(memory_config.vm_memory);
-                        return 1;
-                    }
-
-                    ((uint8_t *) memory_config.vm_memory)[temp] = (uint8_t) (main_hart.x[s_instr.rs2]);
-                    break;
-
-                case 0b001:
-
-                    temp = extend_sign_12(s_instr.imm) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
-
-                    if (temp + 1 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
-                        free(memory_config.vm_memory);
-                        return 1;
-                    }
-
-                    ((uint8_t *) memory_config.vm_memory)[temp]     = (uint8_t) (main_hart.x[s_instr.rs2]);
-                    ((uint8_t *) memory_config.vm_memory)[temp + 1] = (uint8_t) (main_hart.x[s_instr.rs2] >> 8);
-                    break;
-
-                case 0b010:
-
-                    temp = extend_sign_12(s_instr.imm) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
-
-                    if (temp + 3 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
-                        free(memory_config.vm_memory);
-                        return 1;
-                    }
-
-                    ((uint8_t *) memory_config.vm_memory)[temp]     = (uint8_t) (main_hart.x[s_instr.rs2]);
-                    ((uint8_t *) memory_config.vm_memory)[temp + 1] = (uint8_t) (main_hart.x[s_instr.rs2] >> 8);
-                    ((uint8_t *) memory_config.vm_memory)[temp + 2] = (uint8_t) (main_hart.x[s_instr.rs2] >> 16);
-                    ((uint8_t *) memory_config.vm_memory)[temp + 3] = (uint8_t) (main_hart.x[s_instr.rs2] >> 24);
-                    break;
-                }
-                break;
-
             /* This case is responsible for loading things from memory */
             case 0b00000:
                 i_instr = fetch_i(instruction);
@@ -649,6 +650,129 @@ int main(int argc, char **argv) {
                     break;
                 }
                 break;
+
+            /* This case is responsible for loading things into memory */
+            case 0b01000:
+                s_instr = fetch_s(instruction);
+
+                switch (s_instr.funct3) {
+
+                case 0b000:
+
+                    temp = extend_sign_12(s_instr.imm) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
+
+                    if (temp >= memory_config.memory_size) {
+                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
+                        free(memory_config.vm_memory);
+                        return 1;
+                    }
+
+                    ((uint8_t *) memory_config.vm_memory)[temp] = (uint8_t) (main_hart.x[s_instr.rs2]);
+                    break;
+
+                case 0b001:
+
+                    temp = extend_sign_12(s_instr.imm) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
+
+                    if (temp + 1 >= memory_config.memory_size) {
+                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
+                        free(memory_config.vm_memory);
+                        return 1;
+                    }
+
+                    ((uint8_t *) memory_config.vm_memory)[temp]     = (uint8_t) (main_hart.x[s_instr.rs2]);
+                    ((uint8_t *) memory_config.vm_memory)[temp + 1] = (uint8_t) (main_hart.x[s_instr.rs2] >> 8);
+                    break;
+
+                case 0b010:
+
+                    temp = extend_sign_12(s_instr.imm) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
+
+                    if (temp + 3 >= memory_config.memory_size) {
+                        printf("Fatal: virtual memory address is out of bounds: 0x%x\n", temp);
+                        free(memory_config.vm_memory);
+                        return 1;
+                    }
+
+                    ((uint8_t *) memory_config.vm_memory)[temp]     = (uint8_t) (main_hart.x[s_instr.rs2]);
+                    ((uint8_t *) memory_config.vm_memory)[temp + 1] = (uint8_t) (main_hart.x[s_instr.rs2] >> 8);
+                    ((uint8_t *) memory_config.vm_memory)[temp + 2] = (uint8_t) (main_hart.x[s_instr.rs2] >> 16);
+                    ((uint8_t *) memory_config.vm_memory)[temp + 3] = (uint8_t) (main_hart.x[s_instr.rs2] >> 24);
+                    break;
+                }
+                break;
+
+            /* The jal instrcution, aka unconditional jump, or just function call */
+            case 0b11011:
+                u_instr = fetch_j(instruction);
+
+                main_hart.pc += extend_sign_20(u_instr.imm) - 4;
+                if (u_instr.rd != 0) {
+                    main_hart.x[u_instr.rd] = main_hart.pc + 4;
+                }
+                break;
+
+            /* The jalr instruction */
+            case 0b11001:
+                i_instr = fetch_i(instruction);
+
+                temp         = main_hart.pc + 4;
+                main_hart.pc = (main_hart.x[i_instr.rs1] + extend_sign_12(i_instr.imm));
+
+                if (i_instr.rd != 0) {
+                    main_hart.x[i_instr.rd] = temp;
+                }
+                break;
+
+            /* This case is responsible for branching */
+            case 0b11000:
+                s_instr = fetch_b(instruction);
+
+                switch (s_instr.funct3) {
+
+                /* The beq instructtion */
+                case 0b000:
+                    if (main_hart.x[s_instr.rs1] == main_hart.x[s_instr.rs2]) {
+                        main_hart.pc += extend_sign_12(s_instr.imm) - 4;
+                    }
+                    break;
+
+                /* The bne instructtion */
+                case 0b001:
+                    if (main_hart.x[s_instr.rs1] != main_hart.x[s_instr.rs2]) {
+                        main_hart.pc += extend_sign_12(s_instr.imm) - 4;
+                    }
+                    break;
+
+                /* The blt instructtion */
+                case 0b100:
+                    if ((int32_t) (main_hart.x[s_instr.rs1]) < (int32_t) (main_hart.x[s_instr.rs2])) {
+                        main_hart.pc += extend_sign_12(s_instr.imm) - 4;
+                    }
+                    break;
+
+                /* The bge instructtion */
+                case 0b101:
+                    if ((int32_t) (main_hart.x[s_instr.rs1]) >= (int32_t) (main_hart.x[s_instr.rs2])) {
+                        main_hart.pc += extend_sign_12(s_instr.imm) - 4;
+                    }
+                    break;
+
+                /* The bltu instructtion */
+                case 0b110:
+                    if (main_hart.x[s_instr.rs1] < main_hart.x[s_instr.rs2]) {
+                        main_hart.pc += extend_sign_12(s_instr.imm) - 4;
+                    }
+                    break;
+
+                /* The bgeu instructtion */
+                case 0b111:
+                    if (main_hart.x[s_instr.rs1] >= main_hart.x[s_instr.rs2]) {
+                        main_hart.pc += extend_sign_12(s_instr.imm) - 4;
+                    }
+                    break;
+                }
+                // new cases here
             }
             break;
 
