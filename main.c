@@ -912,46 +912,67 @@ int main(int argc, char **argv) {
             case 0b01110:
                 r_instr = fetch_r(instruction);
 
-                switch (r_instr.funct3) {
-                case 0b000:
-                    switch (r_instr.funct7 >> 2) {
-                    case 0b00000:
-
+                switch (r_instr.funct7) {
+                case 0b0000000:
+                    switch (r_instr.funct3) {
+                    case 0b000:
                         main_hart.x[r_instr.rd] =
                             extend_sign((main_hart.x[r_instr.rs1] + main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
                         break;
-
-                    case 0b01000:
-
-                        main_hart.x[r_instr.rd] =
-                            extend_sign((main_hart.x[r_instr.rs1] - main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                    case 0b001:
+                        main_hart.x[r_instr.rd] = extend_sign(
+                            (main_hart.x[r_instr.rs1] << (main_hart.x[r_instr.rs2] & 0b11111)) & UINT32_MAX, 32
+                        );
                         break;
-                    }
-                    break;
-
-                case 0b001:
-
-                    main_hart.x[r_instr.rd] = extend_sign(
-                        (main_hart.x[r_instr.rs1] << (main_hart.x[r_instr.rs2] & 0b11111)) & UINT32_MAX, 32
-                    );
-                    break;
-
-                case 0b101:
-
-                    switch (r_instr.funct7 >> 2) {
-                    case 0b00000:
-
+                    case 0b101:
                         main_hart.x[r_instr.rd] = extend_sign(
                             (main_hart.x[r_instr.rs1] >> (main_hart.x[r_instr.rs2] & 0b11111)) & UINT32_MAX, 32
                         );
                         break;
+                    }
+                    break;
 
-                    case 0b01000:
-
+                case 0b0100000:
+                    switch (r_instr.funct3) {
+                    case 0b000:
+                        main_hart.x[r_instr.rd] =
+                            extend_sign((main_hart.x[r_instr.rs1] - main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        break;
+                    case 0b101:
                         main_hart.x[r_instr.rd] = extend_sign(
                             ((int32_t) main_hart.x[r_instr.rs1] >> (main_hart.x[r_instr.rs2] & 0b11111)) & UINT32_MAX,
                             32
                         );
+                        break;
+                    }
+                    break;
+
+                case 0b0000001:
+                    switch (r_instr.funct3) {
+
+                    /* mulw */
+                    case 0b000:
+                        main_hart.x[r_instr.rd] = extend_sign(((int32_t)main_hart.x[r_instr.rs1] * (int32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        break;
+
+                    /* divw */
+                    case 0b100:
+                        main_hart.x[r_instr.rd] = extend_sign(((int32_t)main_hart.x[r_instr.rs1] / (int32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        break;
+
+                    /* divuw */
+                    case 0b101:
+                        main_hart.x[r_instr.rd] = extend_sign(((uint32_t)main_hart.x[r_instr.rs1] / (uint32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        break;
+
+                    /* remw */
+                    case 0b110:
+                        main_hart.x[r_instr.rd] = extend_sign(((int32_t)main_hart.x[r_instr.rs1] % (int32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        break;
+
+                    /* remuw */
+                    case 0b111:
+                        main_hart.x[r_instr.rd] = extend_sign(((uint32_t)main_hart.x[r_instr.rs1] % (uint32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
                         break;
                     }
                     break;
