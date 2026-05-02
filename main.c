@@ -979,6 +979,13 @@ int main(int argc, char **argv) {
                 }
                 break;
 
+            /* ebreak */
+            /* In my implementation ebreak will force debug menu */
+            case 0b11100:
+                printf("opcode: %x\n", opcode);
+                debug_fn(main_hart);
+                break;
+
             default:
                 free(memory_config.vm_memory);
                 printf("Fatal: 16-bit instructions are not supported right now\n");
