@@ -1,0 +1,1 @@
+clang --target=riscv64 -march=rv64im -mabi=lp64 -nostdlib -static -o program.elf test_risc.asm $*
