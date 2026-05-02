@@ -544,6 +544,60 @@ int main(int argc, char **argv) {
                         break;
                     }
                     break;
+
+                case 0b0000001:
+                    /* RV64M/RV32M instructions */
+                    switch (r_instr.funct3) {
+                    case 0b000:
+
+                        main_hart.x[r_instr.rd] = (uint64_t) ((__int128_t) main_hart.x[r_instr.rs1] *
+                                                              (__int128_t) main_hart.x[r_instr.rs2]);
+                        break;
+
+                    case 0b001:
+
+                        main_hart.x[r_instr.rd] = (uint64_t) (((__int128_t) main_hart.x[r_instr.rs1] *
+                                                               (__int128_t) main_hart.x[r_instr.rs2]) >>
+                                                              64);
+                        break;
+
+                    case 0b010:
+
+                        main_hart.x[r_instr.rd] = (uint64_t) (((__int128_t) main_hart.x[r_instr.rs1] *
+                                                               (__uint128_t) main_hart.x[r_instr.rs2]) >>
+                                                              64);
+                        break;
+
+                    case 0b011:
+
+                        main_hart.x[r_instr.rd] = (uint64_t) (((__uint128_t) main_hart.x[r_instr.rs1] *
+                                                               (__uint128_t) main_hart.x[r_instr.rs2]) >>
+                                                              64);
+                        break;
+
+                    case 0b100:
+
+                        main_hart.x[r_instr.rd] = (int32_t) main_hart.x[r_instr.rs1] /
+                                                  (int32_t) main_hart.x[r_instr.rs2];
+                        break;
+
+                    case 0b101:
+
+                        main_hart.x[r_instr.rd] = main_hart.x[r_instr.rs1] / main_hart.x[r_instr.rs2];
+                        break;
+
+                    case 0b110:
+
+                        main_hart.x[r_instr.rd] = (int64_t) main_hart.x[r_instr.rs1] %
+                                                  (int64_t) main_hart.x[r_instr.rs2];
+                        break;
+
+                    case 0b111:
+
+                        main_hart.x[r_instr.rd] = main_hart.x[r_instr.rs1] % main_hart.x[r_instr.rs2];
+                        break;
+                    }
+                    break;
                 }
                 break;
 
