@@ -332,8 +332,10 @@ inline static memory_config_t setup_memory(flags_t flags) {
                 exit(1);
             }
 
-            if (fread(&((uint8_t *) vm_memory)[phdr.p_vaddr - min_address], phdr.p_filesz, 1, file) != 1) {
-                printf("Fatal: fread retruned error\n");
+            int fread_code = fread(&((uint8_t *) vm_memory)[phdr.p_vaddr - min_address], phdr.p_filesz, 1, file);
+
+            if ((fread_code != 1) && (fread_code != 0)) {
+                printf("Fatal: fread returned error: %d\n", fread_code);
                 exit(1);
             }
         }
@@ -369,7 +371,6 @@ int main(int argc, char **argv) {
     while (main_hart.pc < memory_config.code_segment_max) {
 
         uint32_t instruction = ((uint32_t *) memory_config.vm_memory)[main_hart.pc / 4];
-        printf("Instruction: 0x%x\n", instruction);
         uint8_t opcode       = instruction & 0x7F;
 
         if (flags.debug) {
@@ -1037,7 +1038,28 @@ int main(int argc, char **argv) {
                             return 1;
                         }
 
-                        write(
+                        main_hart.x[10] = write(
+                            main_hart.x[10],
+                            &(memory_config.vm_memory[main_hart.x[11] - memory_config.translation_offset]),
+                            main_hart.x[12]
+                        );
+                        break;
+
+                    /* read */
+                    case 63:
+
+                        if (main_hart.x[11] - memory_config.translation_offset + main_hart.x[12] >
+                            memory_config.memory_size) {
+                            printf(
+                                "Fatal: read tried accessing memory that is %lu bytes beyond limit\n",
+                                main_hart.x[11] + main_hart.x[12] - memory_config.translation_offset -
+                                    memory_config.memory_size
+                            );
+                            free(memory_config.vm_memory);
+                            return 1;
+                        }
+
+                        main_hart.x[10] = read(
                             main_hart.x[10],
                             &(memory_config.vm_memory[main_hart.x[11] - memory_config.translation_offset]),
                             main_hart.x[12]
