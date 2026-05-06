@@ -8,4 +8,4 @@ Just use `clang` or `gcc`. Also, you can use the provided script to build the em
 ## How to build assembly code to test the emulator?
 I personally use the `compileasm.sh` script. It uses `clang` to compile RISC-V RV64M ASM code into an `ELF` executable. But you can always use another tool if you want!
 ## What can it do?
-Right now this emulator can understand all of RV64M instructions except for `ecall`, `ebreak`, and instruction responsible for multithreading and communication between harts.
+Right now this emulator can understand all of RV64M instructions except for instruction responsible for multithreading and communication between harts, and any program in C probably wont work, so you should use assembler.
