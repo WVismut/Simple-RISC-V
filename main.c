@@ -5,6 +5,7 @@
     casting to void is used to silence warnings from clang-tidy
 */
 
+#define _GNU_SOURCE
 #include <elf.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -12,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 typedef struct {
     uint8_t opcode;
@@ -1063,6 +1065,16 @@ int main(int argc, char **argv) {
                             main_hart.x[10],
                             &(memory_config.vm_memory[main_hart.x[11] - memory_config.translation_offset]),
                             main_hart.x[12]
+                        );
+                        break;
+
+                    case 56:
+                        printf("Executing openat\n");    
+                    
+                        main_hart.x[10] = openat(
+                            main_hart.x[10],
+                            &(memory_config.vm_memory[main_hart.x[11] - memory_config.translation_offset]),
+                            main_hart.x[12], main_hart.x[13]
                         );
                         break;
                     }
