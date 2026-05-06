@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef struct {
     uint8_t opcode;
@@ -952,27 +953,37 @@ int main(int argc, char **argv) {
 
                     /* mulw */
                     case 0b000:
-                        main_hart.x[r_instr.rd] = extend_sign(((int32_t)main_hart.x[r_instr.rs1] * (int32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        main_hart.x[r_instr.rd] = extend_sign(
+                            ((int32_t) main_hart.x[r_instr.rs1] * (int32_t) main_hart.x[r_instr.rs2]) & UINT32_MAX, 32
+                        );
                         break;
 
                     /* divw */
                     case 0b100:
-                        main_hart.x[r_instr.rd] = extend_sign(((int32_t)main_hart.x[r_instr.rs1] / (int32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        main_hart.x[r_instr.rd] = extend_sign(
+                            ((int32_t) main_hart.x[r_instr.rs1] / (int32_t) main_hart.x[r_instr.rs2]) & UINT32_MAX, 32
+                        );
                         break;
 
                     /* divuw */
                     case 0b101:
-                        main_hart.x[r_instr.rd] = extend_sign(((uint32_t)main_hart.x[r_instr.rs1] / (uint32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        main_hart.x[r_instr.rd] = extend_sign(
+                            ((uint32_t) main_hart.x[r_instr.rs1] / (uint32_t) main_hart.x[r_instr.rs2]) & UINT32_MAX, 32
+                        );
                         break;
 
                     /* remw */
                     case 0b110:
-                        main_hart.x[r_instr.rd] = extend_sign(((int32_t)main_hart.x[r_instr.rs1] % (int32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        main_hart.x[r_instr.rd] = extend_sign(
+                            ((int32_t) main_hart.x[r_instr.rs1] % (int32_t) main_hart.x[r_instr.rs2]) & UINT32_MAX, 32
+                        );
                         break;
 
                     /* remuw */
                     case 0b111:
-                        main_hart.x[r_instr.rd] = extend_sign(((uint32_t)main_hart.x[r_instr.rs1] % (uint32_t)main_hart.x[r_instr.rs2]) & UINT32_MAX, 32);
+                        main_hart.x[r_instr.rd] = extend_sign(
+                            ((uint32_t) main_hart.x[r_instr.rs1] % (uint32_t) main_hart.x[r_instr.rs2]) & UINT32_MAX, 32
+                        );
                         break;
                     }
                     break;
@@ -983,27 +994,57 @@ int main(int argc, char **argv) {
             /* In my implementation ebreak will force debug menu */
             case 0b11100:
 
-                /* it's actually easier to switch by the entire instruction in 
+                /* it's actually easier to switch by the entire instruction in
                    implementation of these instructions */
 
                 switch (instruction) {
 
-                    /* Here every case number is HUGE, so I will use hexadecimal
-                       instead of binary */
+                /* Here every case number is HUGE, so I will use hexadecimal
+                   instead of binary */
 
-                    /* ecall */
-                    case 0x73:
-                        printf("ecall is not implemented right now\n");
+                /* ecall */
+                case 0x73:
+
+                    /* What ecall will do is based on register a7 (x17) */
+                    switch (main_hart.x[17]) {
+
+                    /* All exit calls are decimal numbers */
+
+                    /* exit */
+                    case 93:
+                        exit(0);
                         break;
 
-                    /* ebreak */
-                    case 0x100073:
-                        printf("opcode: %x\n", opcode);
-                        debug_fn(main_hart);
+                    /* write */
+                    case 64:
+
+                        if (main_hart.x[11] - memory_config.translation_offset + main_hart.x[12] >
+                            memory_config.memory_size) {
+                            printf(
+                                "Fatal: write tried accessing memory that is %lu bytes beyond limit\n",
+                                main_hart.x[11] + main_hart.x[12] - memory_config.translation_offset -
+                                    memory_config.memory_size
+                            );
+                            free(memory_config.vm_memory);
+                            return 1;
+                        }
+
+                        write(
+                            main_hart.x[10],
+                            &(memory_config.vm_memory[main_hart.x[11] - memory_config.translation_offset]),
+                            main_hart.x[12]
+                        );
                         break;
+                    }
+                    break;
+
+                /* ebreak */
+                case 0x100073:
+                    printf("opcode: %x\n", opcode);
+                    debug_fn(main_hart);
+                    break;
                 }
                 break;
-                
 
             default:
                 free(memory_config.vm_memory);
