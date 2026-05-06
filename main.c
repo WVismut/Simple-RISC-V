@@ -1068,14 +1068,19 @@ int main(int argc, char **argv) {
                         );
                         break;
 
+                    /* openat */
                     case 56:
-                        printf("Executing openat\n");    
-                    
+
                         main_hart.x[10] = openat(
                             main_hart.x[10],
                             &(memory_config.vm_memory[main_hart.x[11] - memory_config.translation_offset]),
                             main_hart.x[12], main_hart.x[13]
                         );
+                        break;
+
+                    case 57:
+                        
+                        main_hart.x[10] = close(main_hart.x[10]);
                         break;
                     }
                     break;
