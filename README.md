@@ -7,3 +7,5 @@ Pass a 64 bit elf executable to the emulator, and it will try to handle it. Use 
 Just use `clang` or `gcc`. Also, you can use the provided script to build the emulator. But be carefull: only use compilers that support `__int128_t` type!
 ## How to build assembly code to test the emulator?
 I personally use the `compileasm.sh` script. It uses `clang` to compile RISC-V RV64M ASM code into an `ELF` executable. But you can always use another tool if you want!
+## What can it do?
+Right now this emulator can understand all of RV64M instructions except for `ecall`, `ebreak`, and instruction responsible for multithreading and communication between harts.

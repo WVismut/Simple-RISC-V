@@ -982,9 +982,28 @@ int main(int argc, char **argv) {
             /* ebreak */
             /* In my implementation ebreak will force debug menu */
             case 0b11100:
-                printf("opcode: %x\n", opcode);
-                debug_fn(main_hart);
+
+                /* it's actually easier to switch by the entire instruction in 
+                   implementation of these instructions */
+
+                switch (instruction) {
+
+                    /* Here every case number is HUGE, so I will use hexadecimal
+                       instead of binary */
+
+                    /* ecall */
+                    case 0x73:
+                        printf("ecall is not implemented right now\n");
+                        break;
+
+                    /* ebreak */
+                    case 0x100073:
+                        printf("opcode: %x\n", opcode);
+                        debug_fn(main_hart);
+                        break;
+                }
                 break;
+                
 
             default:
                 free(memory_config.vm_memory);
