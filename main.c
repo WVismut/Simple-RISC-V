@@ -92,7 +92,7 @@ s_instruction_t fetch_s(uint32_t instruction) {
     new_instruction.funct3 = (instruction >> 12) & 0x07;
     new_instruction.rs1    = (instruction >> 15) & 0x1F;
     new_instruction.rs2    = (instruction >> 20) & 0x1F;
-    new_instruction.imm    = ((instruction >> 7) & 0x1F) | ((instruction >> 20) & 0x7E0);
+    new_instruction.imm    = ((instruction >> 7) & 0x1F) | ((instruction >> 20) & 0xFE0);
 
     return new_instruction;
 }
@@ -249,15 +249,15 @@ inline static flags_t parse_flags(int argc, char **argv) {
     return flags;
 }
 
-inline static memory_config_t setup_memory(char *filename) {
+inline static memory_config_t setup_memory(flags_t flags) {
     // what function will return
     memory_config_t memory_config;
     memory_config.code_segment_max = 0;
 
     // open file
-    FILE *file = fopen(filename, "rb");
+    FILE *file = fopen(flags.file_name, "rb");
     if (file == NULL) {
-        printf("Fatal: Can't open file: %s\n", filename);
+        printf("Fatal: Can't open file: %s\n", flags.file_name);
         exit(1);
     }
 
@@ -267,6 +267,8 @@ inline static memory_config_t setup_memory(char *filename) {
         printf("Fatal: Can't read elf header\n");
         exit(1);
     }
+
+    uint64_t entry_point = elf_header.e_entry;
 
     // load & parse program headers
     Elf64_Phdr *program_headers = malloc((long) elf_header.e_phnum * elf_header.e_phentsize);
@@ -285,8 +287,7 @@ inline static memory_config_t setup_memory(char *filename) {
     uint64_t min_address = UINT64_MAX; // vaddr // this is also offset for translation
     uint64_t max_address = 0;          // vaddr + memsz
 
-    // i = 2 is temporary. Everything breaks when i = 0
-    for (int i = 2; i < elf_header.e_phnum; i++) {
+    for (int i = 0; i < elf_header.e_phnum; i++) {
         Elf64_Phdr phdr = program_headers[i];
 
         if (phdr.p_type == PT_LOAD) {
@@ -298,33 +299,31 @@ inline static memory_config_t setup_memory(char *filename) {
                 max_address = phdr.p_vaddr + phdr.p_memsz;
             }
 
-            // find the code segment
+            // find the code segment size
             if (phdr.p_flags & 1) {
-                memory_config.code_segment_min = phdr.p_vaddr;
                 memory_config.code_segment_max = phdr.p_vaddr + phdr.p_memsz;
             }
         }
     }
 
     if (memory_config.code_segment_max == 0) {
-        printf("Fatal: Didn't find the code segment\n");
+        printf("Fatal: no entry in ELF file\n");
         exit(1);
     }
 
-    memory_config.code_segment_min = memory_config.code_segment_min - min_address;
+    memory_config.code_segment_min = entry_point - min_address;
     memory_config.code_segment_max = memory_config.code_segment_max - min_address;
 
     // allocate enough memory
-    void *vm_memory = malloc(max_address - min_address);
+    void *vm_memory = malloc(max_address - min_address + flags.ram_size);
     if (vm_memory == NULL) {
         printf("Fatal: malloc returned null\n");
         exit(1);
     }
-    memset(vm_memory, 0, max_address - min_address);
+    memset(vm_memory, 0, max_address - min_address + flags.ram_size);
 
     // load segments in memory
-    // i = 2 is temporary. Everything breaks when i = 0
-    for (int i = 2; i < elf_header.e_phnum; i++) {
+    for (int i = 0; i < elf_header.e_phnum; i++) {
         Elf64_Phdr phdr = program_headers[i];
 
         if (phdr.p_type == PT_LOAD) {
@@ -343,8 +342,8 @@ inline static memory_config_t setup_memory(char *filename) {
     // clean
     free(program_headers);
 
-    // retrun
-    memory_config.memory_size        = max_address - min_address;
+    // return
+    memory_config.memory_size        = max_address - min_address + flags.ram_size;
     memory_config.vm_memory          = vm_memory;
     memory_config.translation_offset = min_address;
     return memory_config;
@@ -353,10 +352,10 @@ inline static memory_config_t setup_memory(char *filename) {
 int main(int argc, char **argv) {
     flags_t flags = parse_flags(argc, argv);
 
-    memory_config_t memory_config = setup_memory(flags.file_name);
+    memory_config_t memory_config = setup_memory(flags);
 
     hart_state_t main_hart;
-    main_hart.pc = memory_config.code_segment_min / 4;
+    main_hart.pc = memory_config.code_segment_min;
     memset(main_hart.x, 0, sizeof main_hart.x);
 
     r_instruction_t r_instr;
@@ -365,10 +364,17 @@ int main(int argc, char **argv) {
     u_instruction_t u_instr;
     uint64_t temp;
 
+    main_hart.x[2] = memory_config.memory_size + memory_config.translation_offset - 1;
+
     while (main_hart.pc < memory_config.code_segment_max) {
 
         uint32_t instruction = ((uint32_t *) memory_config.vm_memory)[main_hart.pc / 4];
+        printf("Instruction: 0x%x\n", instruction);
         uint8_t opcode       = instruction & 0x7F;
+
+        if (flags.debug) {
+            printf("opcode: %x\n", opcode);
+        }
 
         switch (opcode & 0b11) {
         /* This case is respobsible for all 32-bit lenght instructions */
@@ -765,6 +771,8 @@ int main(int argc, char **argv) {
 
                     temp = extend_sign(s_instr.imm, 12) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
 
+                    printf("imm: %ld\n", extend_sign(s_instr.imm, 12));
+
                     if (temp + 3 >= memory_config.memory_size) {
                         printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
                         free(memory_config.vm_memory);
@@ -1049,12 +1057,12 @@ int main(int argc, char **argv) {
             default:
                 free(memory_config.vm_memory);
                 printf("Fatal: 16-bit instructions are not supported right now\n");
+                printf("Instruction that caused error: 0x%x\n", instruction);
                 return 1;
             }
         }
 
         if (flags.debug) {
-            printf("opcode: %x\n", opcode);
             debug_fn(main_hart);
         }
 
