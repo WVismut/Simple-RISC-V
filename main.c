@@ -7,13 +7,14 @@
 
 #define _GNU_SOURCE
 #include <elf.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
-#include <fcntl.h>
 
 typedef struct {
     uint8_t opcode;
@@ -1078,9 +1079,21 @@ int main(int argc, char **argv) {
                         );
                         break;
 
+                    /* close */
                     case 57:
-                        
+
                         main_hart.x[10] = close(main_hart.x[10]);
+                        break;
+
+                    /* fstat */
+                    case 80:
+
+                        main_hart.x[10] = fstat(
+                            main_hart.x[10],
+                            (struct stat *) &(
+                                memory_config.vm_memory[main_hart.x[11] - memory_config.translation_offset]
+                            )
+                        );
                         break;
                     }
                     break;
