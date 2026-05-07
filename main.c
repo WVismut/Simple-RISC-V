@@ -354,6 +354,24 @@ inline static memory_config_t setup_memory(flags_t flags) {
     return memory_config;
 }
 
+void print_memory_error(
+    uint64_t temp, memory_config_t memory_config, hart_state_t main_hart, uint32_t instruction, i_instruction_t i_instr,
+    char *function_name
+) {
+    printf(
+        "Fatal: virtual memory address is out of bounds: 0x%lx\n"
+        "Memory size: %lu, emulated memory size: %lu, the real address: %lu\n"
+        "Difference between memory size and the address: %ld\n"
+        "Instruction that caused error: 0x%x (%s)\n"
+        "PC = %lu (transl. PC = %lu, t. PC / 4 = %lu)\n"
+        "Entering post-crash debugging\n",
+        temp, memory_config.memory_size, memory_config.memory_size + memory_config.translation_offset,
+        extend_sign(i_instr.imm, 12) + main_hart.x[i_instr.rs1], memory_config.memory_size - temp, instruction,
+        function_name, main_hart.pc, main_hart.pc - memory_config.code_segment_min,
+        (main_hart.pc - memory_config.code_segment_min) / 4
+    );
+}
+
 int main(int argc, char **argv) {
     flags_t flags = parse_flags(argc, argv);
 
@@ -623,7 +641,8 @@ int main(int argc, char **argv) {
                     temp = extend_sign(i_instr.imm, 12) + main_hart.x[i_instr.rs1] - memory_config.translation_offset;
 
                     if (temp >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "lb");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -637,7 +656,8 @@ int main(int argc, char **argv) {
                     temp = extend_sign(i_instr.imm, 12) + main_hart.x[i_instr.rs1] - memory_config.translation_offset;
 
                     if (temp + 1 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "lh");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -655,7 +675,8 @@ int main(int argc, char **argv) {
                     temp = extend_sign(i_instr.imm, 12) + main_hart.x[i_instr.rs1] - memory_config.translation_offset;
 
                     if (temp + 3 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "lw");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -675,7 +696,8 @@ int main(int argc, char **argv) {
                     temp = extend_sign(i_instr.imm, 12) + main_hart.x[i_instr.rs1] - memory_config.translation_offset;
 
                     if (temp >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "lbu");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -689,7 +711,8 @@ int main(int argc, char **argv) {
                     temp = extend_sign(i_instr.imm, 12) + main_hart.x[i_instr.rs1] - memory_config.translation_offset;
 
                     if (temp + 1 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "lhu");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -704,7 +727,8 @@ int main(int argc, char **argv) {
                     temp = extend_sign(i_instr.imm, 12) + main_hart.x[i_instr.rs1] - memory_config.translation_offset;
 
                     if (temp + 3 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "lwu");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -721,7 +745,8 @@ int main(int argc, char **argv) {
                     temp = extend_sign(i_instr.imm, 12) + main_hart.x[i_instr.rs1] - memory_config.translation_offset;
 
                     if (temp + 7 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "ld");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -744,12 +769,14 @@ int main(int argc, char **argv) {
 
                 switch (s_instr.funct3) {
 
+                /* sb */
                 case 0b000:
 
                     temp = extend_sign(s_instr.imm, 12) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
 
                     if (temp >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "sb");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -757,12 +784,14 @@ int main(int argc, char **argv) {
                     ((uint8_t *) memory_config.vm_memory)[temp] = (uint8_t) (main_hart.x[s_instr.rs2]);
                     break;
 
+                /* sh */
                 case 0b001:
 
                     temp = extend_sign(s_instr.imm, 12) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
 
                     if (temp + 1 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "sh");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -771,14 +800,14 @@ int main(int argc, char **argv) {
                     ((uint8_t *) memory_config.vm_memory)[temp + 1] = (uint8_t) (main_hart.x[s_instr.rs2] >> 8);
                     break;
 
+                /* sw */
                 case 0b010:
 
                     temp = extend_sign(s_instr.imm, 12) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
 
-                    printf("imm: %ld\n", extend_sign(s_instr.imm, 12));
-
                     if (temp + 3 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "sw");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
@@ -789,12 +818,14 @@ int main(int argc, char **argv) {
                     ((uint8_t *) memory_config.vm_memory)[temp + 3] = (uint8_t) (main_hart.x[s_instr.rs2] >> 24);
                     break;
 
+                /* sd */
                 case 0b011:
 
                     temp = extend_sign(s_instr.imm, 12) + main_hart.x[s_instr.rs1] - memory_config.translation_offset;
 
                     if (temp + 7 >= memory_config.memory_size) {
-                        printf("Fatal: virtual memory address is out of bounds: 0x%lx\n", temp);
+                        print_memory_error(temp, memory_config, main_hart, instruction, i_instr, "sd");
+                        debug_fn(main_hart);
                         free(memory_config.vm_memory);
                         return 1;
                     }
